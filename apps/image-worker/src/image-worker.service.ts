@@ -6,66 +6,30 @@ import { jobs } from './db/schema';
 @Injectable()
 export class ImageWorkerService
   implements OnModuleInit, OnModuleDestroy {
-  private isRunning = true;
 
   async onModuleInit() {
     console.log('Image Worker started');
-
-    await this.workerLoop();
   }
 
   async onModuleDestroy() {
     console.log('Stopping Image Worker...');
-    this.isRunning = false;
   }
 
-  private async workerLoop() {
-    while (this.isRunning) {
-      try {
-        await this.processJobs();
-      } catch (error) {
-        console.error('Worker loop error:', error);
-      }
 
-      await this.sleep(2000);
-    }
-  }
 
-  private async processJobs() {
-    const job = await db.transaction(async (tx) => {
-      const [job] = await tx
-        .select()
-        .from(jobs)
-        .where(eq(jobs.status, 'queued'))
-        .for('update', { skipLocked: true })
-        .limit(1);
+  public async processJob(job: typeof jobs.$inferSelect) {
+    console.log(`Processing job ${job.id}: ${job.type}`);
 
-      if (!job) {
-        return null;
-      }
 
-      await tx
+    try {
+
+      await db
         .update(jobs)
         .set({
           status: 'running',
         })
         .where(eq(jobs.id, job.id));
 
-      return job;
-    });
-
-    if (!job) {
-      return;
-    }
-
-    await this.processJob(job);
-  }
-
-  private async processJob(job: typeof jobs.$inferSelect) {
-    console.log(`Processing job ${job.id}: ${job.type}`);
-
-
-    try {
       switch (job.type) {
         case 'resize_image':
           await this.resizeImage(job);
