@@ -15,21 +15,11 @@ export const jobStatusEnum = pgEnum('job_status', [
 ]);
 
 export const jobs = pgTable('jobs', {
-  id: uuid('id').defaultRandom().primaryKey(),
-
+  id: uuid('id').primaryKey(),
   type: text('type').notNull(),
-
-  status: jobStatusEnum('status')
-    .default('queued')
-    .notNull(),
-
+  status: jobStatusEnum('status').notNull(),
   input: jsonb('input'),
-
   parameters: jsonb('parameters'),
-
   result: jsonb('result'),
-
-  createdAt: timestamp('created_at')
-    .defaultNow()
-    .notNull(),
+  createdAt: timestamp('created_at').notNull(),
 });
