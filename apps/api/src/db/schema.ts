@@ -1,3 +1,4 @@
+import { integer } from 'drizzle-orm/pg-core';
 import {
   jsonb,
   pgEnum,
@@ -28,6 +29,10 @@ export const jobs = pgTable('jobs', {
   parameters: jsonb('parameters'),
 
   result: jsonb('result'),
+
+  attempts: integer('attempts').notNull().default(0),
+
+  maxAttempts: integer('max_attempts').notNull().default(3),
 
   createdAt: timestamp('created_at')
     .defaultNow()

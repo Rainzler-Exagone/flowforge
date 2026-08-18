@@ -24,10 +24,12 @@ export class JobsService {
       })
       .returning();
 
-    await this.kafka.publish('flowforge.jobs', {
-      jobId: job.id,
-    },
-      job.id,
+    await this.kafka.publish(
+      'flowforge.jobs',
+      {
+        jobId: job.id,
+      },
+      String(job.id),
     );
 
     return job;

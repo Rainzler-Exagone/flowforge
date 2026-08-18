@@ -2,10 +2,16 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { db } from './db';
 import { jobs } from './db/schema';
+import { KafkaService } from 'libs/kafka/src';
 
 @Injectable()
 export class ImageWorkerService
   implements OnModuleInit, OnModuleDestroy {
+
+  constructor(
+    private readonly kafka: KafkaService,
+  ) { }
+
 
   async onModuleInit() {
     console.log('Image Worker started');
@@ -18,7 +24,9 @@ export class ImageWorkerService
 
 
   public async processJob(job: typeof jobs.$inferSelect) {
-    console.log(`Processing job ${job.id}: ${job.type}`);
+    console.log(
+      `Processing job ${job.id}: ${job.type} (attempt ${job.attempts + 1})`,
+    );
 
 
     try {
@@ -43,17 +51,16 @@ export class ImageWorkerService
         .update(jobs)
         .set({
           status: 'completed',
+          attempts: job.attempts + 1,
         })
         .where(eq(jobs.id, job.id));
 
       console.log(`Job ${job.id} completed`);
     } catch (error) {
-      await db
-        .update(jobs)
-        .set({
-          status: 'failed',
-        })
-        .where(eq(jobs.id, job.id));
+
+
+      console.error(`Job ${job.id} failed`, error);
+      await this.retryJob(job);
 
       console.error(`Job ${job.id} failed`, error);
     }
@@ -65,9 +72,60 @@ export class ImageWorkerService
     console.log('Resize parameters:', job.parameters);
 
     await this.sleep(2000);
+
+    throw new Error('Simulated image processing failure');
+
   }
 
   private sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+
+
+  private async retryJob(
+    job: typeof jobs.$inferSelect,
+  ) {
+    const nextAttempt = job.attempts + 1;
+
+    if (nextAttempt >= job.maxAttempts) {
+      await db
+        .update(jobs)
+        .set({
+          status: 'failed',
+          attempts: nextAttempt,
+        })
+        .where(eq(jobs.id, job.id));
+
+      console.log(
+        `Job ${job.id} permanently failed after ${nextAttempt} attempts`,
+      );
+
+      return;
+    }
+
+    await db
+      .update(jobs)
+      .set({
+        status: 'queued',
+        attempts: nextAttempt,
+      })
+      .where(eq(jobs.id, job.id));
+
+    const delay = Math.pow(2, nextAttempt - 1) * 1000;
+
+    console.log(
+      `Job ${job.id} failed. Retrying in ${delay}ms`,
+    );
+
+    await this.sleep(delay);
+
+    await this.kafka.publish(
+      'flowforge.jobs',
+      {
+        jobId: job.id,
+      },
+      String(job.id),
+    );
+  }
+
 }

@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ImageWorkerService } from './image-worker.service';
 import { KafkaConsumerService } from './kafka.consumer';
+import { KafkaModule } from 'libs/kafka/src';
 
 @Module({
-  imports: [],
+  imports: [KafkaModule],
   controllers: [],
-  providers: [ImageWorkerService,KafkaConsumerService],
+  providers: [ImageWorkerService, KafkaConsumerService],
 })
-export class ImageWorkerModule {}
+export class ImageWorkerModule { }
