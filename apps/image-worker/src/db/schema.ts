@@ -24,5 +24,6 @@ export const jobs = pgTable('jobs', {
   result: jsonb('result'),
   attempts: integer('attempts').notNull().default(0),
   maxAttempts: integer('max_attempts').notNull().default(3),
+  lockedAt: timestamp('locked_at'),
   createdAt: timestamp('created_at').notNull(),
 });

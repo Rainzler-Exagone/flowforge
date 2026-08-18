@@ -34,6 +34,9 @@ export const jobs = pgTable('jobs', {
 
   maxAttempts: integer('max_attempts').notNull().default(3),
 
+
+  lockedAt: timestamp('locked_at'),
+  
   createdAt: timestamp('created_at')
     .defaultNow()
     .notNull(),

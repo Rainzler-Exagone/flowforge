@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import { db } from './db';
 import { jobs } from './db/schema';
 import { KafkaService } from 'libs/kafka/src';
@@ -12,13 +12,21 @@ export class ImageWorkerService
     private readonly kafka: KafkaService,
   ) { }
 
+  private readonly JOB_LEASE_MS = 5 * 60 * 1000;
+  private recoveryInterval?: NodeJS.Timeout;
 
   async onModuleInit() {
     console.log('Image Worker started');
+    this.recoveryInterval = setInterval(() => {
+      void this.recoverStaleJobs();
+    }, 60_000);
   }
 
   async onModuleDestroy() {
     console.log('Stopping Image Worker...');
+    if (this.recoveryInterval) {
+      clearInterval(this.recoveryInterval);
+    }
   }
 
 
@@ -40,7 +48,7 @@ export class ImageWorkerService
       return;
     }
 
-   
+
 
     try {
 
@@ -48,6 +56,7 @@ export class ImageWorkerService
         .update(jobs)
         .set({
           status: 'running',
+          lockedAt: new Date(),
         })
         .where(
           and(
@@ -66,9 +75,9 @@ export class ImageWorkerService
       }
 
       console.log(`Job ${job.id} claimed by this worker`);
-       console.log(
-      `Processing job ${job.id}: ${job.type} (attempt ${currentJob.attempts + 1})`,
-    );
+      console.log(
+        `Processing job ${job.id}: ${job.type} (attempt ${currentJob.attempts + 1})`,
+      );
 
 
       switch (job.type) {
@@ -85,6 +94,7 @@ export class ImageWorkerService
         .set({
           status: 'completed',
           attempts: job.attempts + 1,
+          lockedAt: null
         })
         .where(eq(jobs.id, job.id));
 
@@ -104,7 +114,7 @@ export class ImageWorkerService
   ) {
     console.log('Resize parameters:', job.parameters);
 
-    await this.sleep(100000);
+    await this.sleep(2000);
 
   }
 
@@ -173,5 +183,97 @@ export class ImageWorkerService
   }
 
 
+
+  private async recoverStaleJobs() {
+    const cutoff = new Date(Date.now() - this.JOB_LEASE_MS);
+
+    const staleJobs = await db
+      .select()
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.status, 'running'),
+          lt(jobs.lockedAt, cutoff),
+        ),
+      );
+
+    for (const job of staleJobs) {
+      const nextAttempt = job.attempts + 1;
+
+      console.log(
+        `Recovering stale job ${job.id} (attempt ${nextAttempt})`,
+      );
+
+      if (nextAttempt >= job.maxAttempts) {
+        await db
+          .update(jobs)
+          .set({
+            status: 'failed',
+            attempts: nextAttempt,
+            lockedAt: null,
+          })
+          .where(
+            and(
+              eq(jobs.id, job.id),
+              eq(jobs.status, 'running'),
+              lt(jobs.lockedAt, cutoff),
+            ),
+          );
+
+        await this.kafka.publish(
+          'flowforge.jobs.dlq',
+          {
+            jobId: job.id,
+            type: job.type,
+            input: job.input,
+            parameters: job.parameters,
+            attempts: nextAttempt,
+            reason: 'worker_lease_expired',
+          },
+          String(job.id),
+        );
+
+        console.log(
+          `Job ${job.id} moved to DLQ after worker lease expired`,
+        );
+
+        continue;
+      }
+
+      const result = await db
+        .update(jobs)
+        .set({
+          status: 'queued',
+          attempts: nextAttempt,
+          lockedAt: null,
+        })
+        .where(
+          and(
+            eq(jobs.id, job.id),
+            eq(jobs.status, 'running'),
+            lt(jobs.lockedAt, cutoff),
+          ),
+        )
+        .returning();
+
+      // Another worker may have changed the job
+      // between SELECT and UPDATE.
+      if (result.length === 0) {
+        continue;
+      }
+
+      await this.kafka.publish(
+        'flowforge.jobs',
+        {
+          jobId: job.id,
+        },
+        String(job.id),
+      );
+
+      console.log(
+        `Stale job ${job.id} recovered and requeued`,
+      );
+    }
+  }
 
 }
