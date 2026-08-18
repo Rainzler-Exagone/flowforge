@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from './db';
 import { jobs } from './db/schema';
 import { KafkaService } from 'libs/kafka/src';
@@ -24,19 +24,52 @@ export class ImageWorkerService
 
 
   public async processJob(job: typeof jobs.$inferSelect) {
-    console.log(
-      `Processing job ${job.id}: ${job.type} (attempt ${job.attempts + 1})`,
-    );
+    const [currentJob] = await db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, job.id))
+      .limit(1);
 
+    if (!currentJob) {
+      console.log(`Job ${job.id} no longer exists. Skipping.`);
+      return;
+    }
+
+    if (currentJob.status === 'completed') {
+      console.log(`Job ${job.id} already completed. Skipping.`);
+      return;
+    }
+
+   
 
     try {
 
-      await db
+      const claimedJob = await db
         .update(jobs)
         .set({
           status: 'running',
         })
-        .where(eq(jobs.id, job.id));
+        .where(
+          and(
+            eq(jobs.id, job.id),
+            eq(jobs.status, 'queued'),
+          ),
+        )
+        .returning();
+
+      if (claimedJob.length === 0) {
+        console.log(
+          `Job ${job.id} was already claimed. Skipping.`,
+        );
+
+        return;
+      }
+
+      console.log(`Job ${job.id} claimed by this worker`);
+       console.log(
+      `Processing job ${job.id}: ${job.type} (attempt ${currentJob.attempts + 1})`,
+    );
+
 
       switch (job.type) {
         case 'resize_image':
@@ -71,9 +104,7 @@ export class ImageWorkerService
   ) {
     console.log('Resize parameters:', job.parameters);
 
-    await this.sleep(2000);
-
-    throw new Error('Simulated image processing failure');
+    await this.sleep(100000);
 
   }
 
