@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { JobsService } from './job.service';
 
 @Controller('jobs')
@@ -24,5 +24,10 @@ export class JobsController {
     @Get()
     findAll() {
         return this.jobsService.findAll();
+    }
+
+    @Post(':id/retry')
+    retryJobs(@Param('id') id: string) {
+            return this.jobsService.retryFailedJob(id);
     }
 }

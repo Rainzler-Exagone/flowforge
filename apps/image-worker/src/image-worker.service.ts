@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { db } from './db';
 import { jobs } from './db/schema';
@@ -96,8 +96,21 @@ export class ImageWorkerService
         })
         .where(eq(jobs.id, job.id));
 
+      await this.kafka.publish(
+        'flowforge.jobs.dlq',
+        {
+          jobId: job.id,
+          type: job.type,
+          input: job.input,
+          parameters: job.parameters,
+          attempts: nextAttempt,
+          reason: 'max_retries_exceeded',
+        },
+        String(job.id),
+      );
+
       console.log(
-        `Job ${job.id} permanently failed after ${nextAttempt} attempts`,
+        `Job ${job.id} moved to DLQ after ${nextAttempt} attempts`,
       );
 
       return;
@@ -127,5 +140,7 @@ export class ImageWorkerService
       String(job.id),
     );
   }
+
+
 
 }
