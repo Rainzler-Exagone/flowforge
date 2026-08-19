@@ -3,6 +3,7 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 import { db } from './db';
 import { jobs } from './db/schema';
 import { KafkaService } from 'libs/kafka/src';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class ImageWorkerService
@@ -32,6 +33,7 @@ export class ImageWorkerService
 
 
   public async processJob(job: typeof jobs.$inferSelect) {
+    const leaseId = randomUUID()
     const [currentJob] = await db
       .select()
       .from(jobs)
@@ -47,16 +49,19 @@ export class ImageWorkerService
       console.log(`Job ${job.id} already completed. Skipping.`);
       return;
     }
-
+    let heartbeatInterval: NodeJS.Timeout | undefined;
 
 
     try {
+
 
       const claimedJob = await db
         .update(jobs)
         .set({
           status: 'running',
           lockedAt: new Date(),
+          leaseId,
+
         })
         .where(
           and(
@@ -75,9 +80,13 @@ export class ImageWorkerService
       }
 
       console.log(`Job ${job.id} claimed by this worker`);
+      heartbeatInterval = setInterval(() => {
+        void this.renewLease(job.id, leaseId);
+      }, 60_000);
       console.log(
         `Processing job ${job.id}: ${job.type} (attempt ${currentJob.attempts + 1})`,
       );
+
 
 
       switch (job.type) {
@@ -89,23 +98,41 @@ export class ImageWorkerService
           throw new Error(`Unsupported job type: ${job.type}`);
       }
 
-      await db
+      const completedJob = await db
         .update(jobs)
         .set({
           status: 'completed',
           attempts: job.attempts + 1,
-          lockedAt: null
-        })
-        .where(eq(jobs.id, job.id));
+          lockedAt: null,
+          leaseId: null,
 
+        })
+        .where(and(
+          eq(jobs.id, job.id),
+          eq(jobs.status, 'running'),
+          eq(jobs.leaseId, leaseId),
+        ),).returning();
+
+
+      if (completedJob.length === 0) {
+        console.log(
+          `Job ${job.id} lease expired or was reclaimed. ` +
+          `This worker will not complete it.`,
+        );
+
+        return;
+      }
       console.log(`Job ${job.id} completed`);
     } catch (error) {
 
 
       console.error(`Job ${job.id} failed`, error);
-      await this.retryJob(job);
+      await this.retryJob(currentJob, leaseId);
 
-      console.error(`Job ${job.id} failed`, error);
+    } finally {
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+      }
     }
   }
 
@@ -114,7 +141,7 @@ export class ImageWorkerService
   ) {
     console.log('Resize parameters:', job.parameters);
 
-    await this.sleep(2000);
+    await this.sleep(100000);
 
   }
 
@@ -124,7 +151,8 @@ export class ImageWorkerService
 
 
   private async retryJob(
-    job: typeof jobs.$inferSelect,
+    job,
+    leaseId,
   ) {
     const nextAttempt = job.attempts + 1;
 
@@ -135,7 +163,11 @@ export class ImageWorkerService
           status: 'failed',
           attempts: nextAttempt,
         })
-        .where(eq(jobs.id, job.id));
+        .where(and(
+          eq(jobs.id, job.id),
+          eq(jobs.status, 'running'),
+          eq(jobs.leaseId, leaseId),
+        ),);
 
       await this.kafka.publish(
         'flowforge.jobs.dlq',
@@ -157,13 +189,29 @@ export class ImageWorkerService
       return;
     }
 
-    await db
+    const result = await db
       .update(jobs)
       .set({
         status: 'queued',
         attempts: nextAttempt,
+        lockedAt: null,
+        leaseId: null,
       })
-      .where(eq(jobs.id, job.id));
+      .where(
+        and(
+          eq(jobs.id, job.id),
+          eq(jobs.status, 'running'),
+          eq(jobs.leaseId, leaseId),
+        ),
+      )
+      .returning();
+
+    if (result.length === 0) {
+      console.log(
+        `Job ${job.id} is no longer owned by this worker. Retry cancelled.`,
+      );
+      return;
+    }
 
     const delay = Math.pow(2, nextAttempt - 1) * 1000;
 
@@ -211,6 +259,7 @@ export class ImageWorkerService
             status: 'failed',
             attempts: nextAttempt,
             lockedAt: null,
+            leaseId: null,
           })
           .where(
             and(
@@ -246,6 +295,7 @@ export class ImageWorkerService
           status: 'queued',
           attempts: nextAttempt,
           lockedAt: null,
+          leaseId: null
         })
         .where(
           and(
@@ -274,6 +324,39 @@ export class ImageWorkerService
         `Stale job ${job.id} recovered and requeued`,
       );
     }
+  }
+
+
+
+  private async renewLease(
+    jobId: string,
+    leaseId: string,
+  ) {
+    const result = await db
+      .update(jobs)
+      .set({
+        lockedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(jobs.id, jobId),
+          eq(jobs.status, 'running'),
+          eq(jobs.leaseId, leaseId),
+        ),
+      )
+      .returning({ id: jobs.id });
+
+    if (result.length === 0) {
+      console.log(
+        `Job ${jobId} lease is no longer owned by this worker`,
+      );
+
+      return false;
+    }
+
+    console.log(`Lease renewed for job ${jobId}`);
+
+    return true;
   }
 
 }

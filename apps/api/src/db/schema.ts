@@ -18,6 +18,8 @@ export const jobStatusEnum = pgEnum('job_status', [
 export const jobs = pgTable('jobs', {
   id: uuid('id').defaultRandom().primaryKey(),
 
+  leaseId: uuid('lease_id'),
+
   type: text('type').notNull(),
 
   status: jobStatusEnum('status')
@@ -36,7 +38,7 @@ export const jobs = pgTable('jobs', {
 
 
   lockedAt: timestamp('locked_at'),
-  
+
   createdAt: timestamp('created_at')
     .defaultNow()
     .notNull(),

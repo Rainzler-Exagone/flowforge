@@ -17,6 +17,7 @@ export const jobStatusEnum = pgEnum('job_status', [
 
 export const jobs = pgTable('jobs', {
   id: uuid('id').primaryKey(),
+  leaseId: uuid('lease_id'),
   type: text('type').notNull(),
   status: jobStatusEnum('status').notNull(),
   input: jsonb('input'),
