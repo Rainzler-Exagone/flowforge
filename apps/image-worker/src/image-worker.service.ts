@@ -4,6 +4,8 @@ import { db } from './db';
 import { jobs } from './db/schema';
 import { KafkaService } from 'libs/kafka/src';
 import { randomUUID } from 'crypto';
+import { mkdir, writeFile } from 'fs/promises';
+import { join } from 'path';
 
 @Injectable()
 export class ImageWorkerService
@@ -141,8 +143,23 @@ export class ImageWorkerService
   ) {
     console.log('Resize parameters:', job.parameters);
 
-    await this.sleep(100000);
+    const outputDir = join(process.cwd(), 'processed');
+    await mkdir(outputDir, { recursive: true });
 
+    const outputPath = join(
+      outputDir,
+      `${job.id}.jpg`,
+    );
+
+    await writeFile(
+      outputPath,
+      `RESIZED IMAGE FOR JOB ${job.id}`,
+    );
+
+    console.log(`Image created: ${outputPath}`);
+
+    // Simulate crash AFTER the side effect
+   // throw new Error('Simulated crash after image creation');
   }
 
   private sleep(ms: number) {

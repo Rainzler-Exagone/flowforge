@@ -36,6 +36,20 @@
       "when": 1787154072077,
       "tag": "0004_rich_microbe",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787182809381,
+      "tag": "0005_bouncy_living_lightning",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787236695532,
+      "tag": "0006_burly_marten_broadcloak",
+      "breakpoints": true
     }
   ]
 }

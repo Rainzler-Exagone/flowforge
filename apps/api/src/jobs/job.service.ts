@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { db } from '../db';
-import { jobs } from '../db/schema';
+import { jobs, outboxEvents } from '../db/schema';
 import { KafkaService } from 'libs/kafka/src/kafka.service';
 import { eq } from 'drizzle-orm';
 
@@ -16,22 +16,29 @@ export class JobsService {
     input?: unknown,
     parameters?: unknown,
   ) {
-    const [job] = await db
-      .insert(jobs)
-      .values({
-        type,
-        input,
-        parameters,
-      })
-      .returning();
+    const job = await db.transaction(async (tx) => {
+      const [job] = await tx
+        .insert(jobs)
+        .values({
+          type: 'resize_image',
+          status: 'queued',
+          input: input,
+          parameters: parameters,
+        })
+        .returning();
 
-    await this.kafka.publish(
-      'flowforge.jobs',
-      {
-        jobId: job.id,
-      },
-      String(job.id),
-    );
+      await tx.insert(outboxEvents).values({
+        topic: 'flowforge.jobs',
+        key: job.id,
+        payload: {
+          jobId: job.id,
+        },
+      });
+
+      return job;
+    });
+
+
 
     return job;
   }

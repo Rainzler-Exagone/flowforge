@@ -28,3 +28,41 @@ export const jobs = pgTable('jobs', {
   lockedAt: timestamp('locked_at'),
   createdAt: timestamp('created_at').notNull(),
 });
+
+
+
+export const outboxEvents = pgTable('outbox_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  topic: text('topic').notNull(),
+
+  key: text('key').notNull(),
+
+  payload: jsonb('payload').notNull(),
+
+  publishedAt: timestamp('published_at'),
+
+  createdAt: timestamp('created_at')
+    .defaultNow()
+    .notNull(),
+});
+
+
+
+export const jobResults = pgTable(
+  'job_results',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+
+    jobId: uuid('job_id')
+      .notNull()
+      .references(() => jobs.id)
+      .unique(),
+
+    result: jsonb('result').notNull(),
+
+    createdAt: timestamp('created_at')
+      .defaultNow()
+      .notNull(),
+  },
+);
