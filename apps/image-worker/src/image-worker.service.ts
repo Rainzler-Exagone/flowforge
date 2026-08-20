@@ -1,7 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { db } from './db';
-import { jobs } from './db/schema';
+import { jobResults, jobs } from './db/schema';
 import { KafkaService } from 'libs/kafka/src';
 import { randomUUID } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
@@ -143,23 +143,39 @@ export class ImageWorkerService
   ) {
     console.log('Resize parameters:', job.parameters);
 
-    const outputDir = join(process.cwd(), 'processed');
-    await mkdir(outputDir, { recursive: true });
+    await this.sleep(2000);
 
-    const outputPath = join(
-      outputDir,
-      `${job.id}.jpg`,
+    const result = {
+      output: `jobs/${job.id}/resized.jpg`,
+      width: (job.parameters as any).width,
+      height: (job.parameters as any).height,
+    };
+
+    const [createdResult] = await db
+      .insert(jobResults)
+      .values({
+        jobId: job.id,
+        result,
+      })
+      .onConflictDoNothing({
+        target: jobResults.jobId,
+      })
+      .returning();
+
+    if (!createdResult) {
+      console.log(
+        `Result for job ${job.id} already exists. Skipping duplicate result.`,
+      );
+
+      return;
+    }
+
+    console.log(
+      `Created result for job ${job.id}:`,
+      result,
     );
 
-    await writeFile(
-      outputPath,
-      `RESIZED IMAGE FOR JOB ${job.id}`,
-    );
-
-    console.log(`Image created: ${outputPath}`);
-
-    // Simulate crash AFTER the side effect
-   // throw new Error('Simulated crash after image creation');
+    process.exit(1);
   }
 
   private sleep(ms: number) {
