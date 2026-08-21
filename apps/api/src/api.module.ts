@@ -2,11 +2,16 @@ import { Module } from '@nestjs/common';
 import { JobsModule } from './jobs/job.module';
 import { KafkaModule } from 'libs/kafka/src';
 import { OutboxPublisherService } from './outbox/outbox-publisher.service';
+import { LoggerModule } from 'pino-nestjs'
+import { DatabaseService } from './db/db.service';
+import { LoggingModule } from './logging/logging.module';
 
 
 @Module({
-  imports: [JobsModule,KafkaModule],
+  imports:
+    [
+      LoggingModule, JobsModule, KafkaModule],
   controllers: [],
-  providers: [OutboxPublisherService],
+  providers: [OutboxPublisherService, DatabaseService],
 })
-export class ApiModule {}
+export class ApiModule { }

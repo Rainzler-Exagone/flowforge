@@ -3,6 +3,7 @@ import { isNull, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { outboxEvents } from '../db/schema';
 import { KafkaService } from 'libs/kafka/src';
+import { PinoLogger } from 'pino-nestjs';
 
 @Injectable()
 export class OutboxPublisherService
@@ -12,10 +13,11 @@ export class OutboxPublisherService
 
   constructor(
     private readonly kafka: KafkaService,
-  ) {}
+    private readonly logger: PinoLogger,
+  ) { }
 
   async onModuleInit() {
-    console.log('Outbox Publisher started');
+    this.logger.info('Outbox Publisher started');
 
     this.interval = setInterval(() => {
       void this.publishPendingEvents();
@@ -54,13 +56,18 @@ export class OutboxPublisherService
             eq(outboxEvents.id, event.id),
           );
 
-        console.log(
-          `Outbox event ${event.id} published`,
+        this.logger.info(
+          { eventId: event.id, topic: event.topic },
+          'Outbox event published',
         );
       } catch (error) {
-        console.error(
-          `Failed to publish outbox event ${event.id}`,
-          error,
+        this.logger.error(
+          {
+            err: error,
+            eventId: event.id,
+            topic: event.topic,
+          },
+          'Failed to publish outbox event',
         );
       }
     }

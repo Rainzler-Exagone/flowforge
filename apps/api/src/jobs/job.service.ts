@@ -22,8 +22,8 @@ export class JobsService {
         .values({
           type: 'resize_image',
           status: 'queued',
-          input: input,
-          parameters: parameters,
+          input,
+          parameters,
         })
         .returning();
 

@@ -1,11 +1,10 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { and, eq, lt } from 'drizzle-orm';
 import { db } from './db';
 import { jobResults, jobs } from './db/schema';
 import { KafkaService } from 'libs/kafka/src';
 import { randomUUID } from 'crypto';
-import { mkdir, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { PinoLogger } from 'pino-nestjs';
 
 @Injectable()
 export class ImageWorkerService
@@ -13,29 +12,31 @@ export class ImageWorkerService
 
   constructor(
     private readonly kafka: KafkaService,
-  ) { }
+    private readonly logger: PinoLogger,
+  ) {}
 
   private readonly JOB_LEASE_MS = 5 * 60 * 1000;
   private recoveryInterval?: NodeJS.Timeout;
 
   async onModuleInit() {
-    console.log('Image Worker started');
+    this.logger.info('Image Worker started');
+
     this.recoveryInterval = setInterval(() => {
       void this.recoverStaleJobs();
     }, 60_000);
   }
 
   async onModuleDestroy() {
-    console.log('Stopping Image Worker...');
+    this.logger.info('Stopping Image Worker...');
+
     if (this.recoveryInterval) {
       clearInterval(this.recoveryInterval);
     }
   }
 
-
-
   public async processJob(job: typeof jobs.$inferSelect) {
-    const leaseId = randomUUID()
+    const leaseId = randomUUID();
+
     const [currentJob] = await db
       .select()
       .from(jobs)
@@ -43,27 +44,30 @@ export class ImageWorkerService
       .limit(1);
 
     if (!currentJob) {
-      console.log(`Job ${job.id} no longer exists. Skipping.`);
+      this.logger.info(
+        { jobId: job.id },
+        'Job no longer exists. Skipping',
+      );
       return;
     }
 
     if (currentJob.status === 'completed') {
-      console.log(`Job ${job.id} already completed. Skipping.`);
+      this.logger.info(
+        { jobId: job.id },
+        'Job already completed. Skipping',
+      );
       return;
     }
+
     let heartbeatInterval: NodeJS.Timeout | undefined;
 
-
     try {
-
-
       const claimedJob = await db
         .update(jobs)
         .set({
           status: 'running',
           lockedAt: new Date(),
           leaseId,
-
         })
         .where(
           and(
@@ -74,22 +78,31 @@ export class ImageWorkerService
         .returning();
 
       if (claimedJob.length === 0) {
-        console.log(
-          `Job ${job.id} was already claimed. Skipping.`,
+        this.logger.info(
+          { jobId: job.id },
+          'Job was already claimed. Skipping',
         );
 
         return;
       }
 
-      console.log(`Job ${job.id} claimed by this worker`);
+      this.logger.info(
+        { jobId: job.id },
+        'Job claimed by this worker',
+      );
+
       heartbeatInterval = setInterval(() => {
         void this.renewLease(job.id, leaseId);
       }, 60_000);
-      console.log(
-        `Processing job ${job.id}: ${job.type} (attempt ${currentJob.attempts + 1})`,
+
+      this.logger.info(
+        {
+          jobId: job.id,
+          jobType: job.type,
+          attempt: currentJob.attempts + 1,
+        },
+        'Processing job',
       );
-
-
 
       switch (job.type) {
         case 'resize_image':
@@ -107,30 +120,39 @@ export class ImageWorkerService
           attempts: job.attempts + 1,
           lockedAt: null,
           leaseId: null,
-
         })
-        .where(and(
-          eq(jobs.id, job.id),
-          eq(jobs.status, 'running'),
-          eq(jobs.leaseId, leaseId),
-        ),).returning();
-
+        .where(
+          and(
+            eq(jobs.id, job.id),
+            eq(jobs.status, 'running'),
+            eq(jobs.leaseId, leaseId),
+          ),
+        )
+        .returning();
 
       if (completedJob.length === 0) {
-        console.log(
-          `Job ${job.id} lease expired or was reclaimed. ` +
-          `This worker will not complete it.`,
+        this.logger.warn(
+          { jobId: job.id },
+          'Job lease expired or was reclaimed. This worker will not complete it.',
         );
 
         return;
       }
-      console.log(`Job ${job.id} completed`);
+
+      this.logger.info(
+        { jobId: job.id },
+        'Job completed',
+      );
     } catch (error) {
+      this.logger.error(
+        {
+          err: error,
+          jobId: job.id,
+        },
+        'Job processing failed',
+      );
 
-
-      console.error(`Job ${job.id} failed`, error);
       await this.retryJob(currentJob, leaseId);
-
     } finally {
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
@@ -141,7 +163,13 @@ export class ImageWorkerService
   private async resizeImage(
     job: typeof jobs.$inferSelect,
   ) {
-    console.log('Resize parameters:', job.parameters);
+    this.logger.info(
+      {
+        jobId: job.id,
+        parameters: job.parameters,
+      },
+      'Resize parameters',
+    );
 
     await this.sleep(2000);
 
@@ -163,18 +191,23 @@ export class ImageWorkerService
       .returning();
 
     if (!createdResult) {
-      console.log(
-        `Result for job ${job.id} already exists. Skipping duplicate result.`,
+      this.logger.info(
+        { jobId: job.id },
+        'Result already exists. Skipping duplicate result',
       );
 
       return;
     }
 
-    console.log(
-      `Created result for job ${job.id}:`,
-      result,
+    this.logger.info(
+      {
+        jobId: job.id,
+        result,
+      },
+      'Created job result',
     );
 
+    // Intentional crash used for the idempotency/recovery test.
     process.exit(1);
   }
 
@@ -182,10 +215,9 @@ export class ImageWorkerService
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-
   private async retryJob(
-    job,
-    leaseId,
+    job: typeof jobs.$inferSelect,
+    leaseId: string,
   ) {
     const nextAttempt = job.attempts + 1;
 
@@ -196,11 +228,13 @@ export class ImageWorkerService
           status: 'failed',
           attempts: nextAttempt,
         })
-        .where(and(
-          eq(jobs.id, job.id),
-          eq(jobs.status, 'running'),
-          eq(jobs.leaseId, leaseId),
-        ),);
+        .where(
+          and(
+            eq(jobs.id, job.id),
+            eq(jobs.status, 'running'),
+            eq(jobs.leaseId, leaseId),
+          ),
+        );
 
       await this.kafka.publish(
         'flowforge.jobs.dlq',
@@ -215,8 +249,12 @@ export class ImageWorkerService
         String(job.id),
       );
 
-      console.log(
-        `Job ${job.id} moved to DLQ after ${nextAttempt} attempts`,
+      this.logger.warn(
+        {
+          jobId: job.id,
+          attempts: nextAttempt,
+        },
+        'Job moved to DLQ after maximum retries',
       );
 
       return;
@@ -240,16 +278,23 @@ export class ImageWorkerService
       .returning();
 
     if (result.length === 0) {
-      console.log(
-        `Job ${job.id} is no longer owned by this worker. Retry cancelled.`,
+      this.logger.info(
+        { jobId: job.id },
+        'Job is no longer owned by this worker. Retry cancelled',
       );
+
       return;
     }
 
     const delay = Math.pow(2, nextAttempt - 1) * 1000;
 
-    console.log(
-      `Job ${job.id} failed. Retrying in ${delay}ms`,
+    this.logger.warn(
+      {
+        jobId: job.id,
+        attempt: nextAttempt,
+        delay,
+      },
+      'Job failed. Retrying',
     );
 
     await this.sleep(delay);
@@ -263,10 +308,10 @@ export class ImageWorkerService
     );
   }
 
-
-
   private async recoverStaleJobs() {
-    const cutoff = new Date(Date.now() - this.JOB_LEASE_MS);
+    const cutoff = new Date(
+      Date.now() - this.JOB_LEASE_MS,
+    );
 
     const staleJobs = await db
       .select()
@@ -281,8 +326,12 @@ export class ImageWorkerService
     for (const job of staleJobs) {
       const nextAttempt = job.attempts + 1;
 
-      console.log(
-        `Recovering stale job ${job.id} (attempt ${nextAttempt})`,
+      this.logger.warn(
+        {
+          jobId: job.id,
+          attempt: nextAttempt,
+        },
+        'Recovering stale job',
       );
 
       if (nextAttempt >= job.maxAttempts) {
@@ -315,8 +364,12 @@ export class ImageWorkerService
           String(job.id),
         );
 
-        console.log(
-          `Job ${job.id} moved to DLQ after worker lease expired`,
+        this.logger.warn(
+          {
+            jobId: job.id,
+            attempts: nextAttempt,
+          },
+          'Job moved to DLQ after worker lease expired',
         );
 
         continue;
@@ -328,7 +381,7 @@ export class ImageWorkerService
           status: 'queued',
           attempts: nextAttempt,
           lockedAt: null,
-          leaseId: null
+          leaseId: null,
         })
         .where(
           and(
@@ -353,13 +406,12 @@ export class ImageWorkerService
         String(job.id),
       );
 
-      console.log(
-        `Stale job ${job.id} recovered and requeued`,
+      this.logger.info(
+        { jobId: job.id },
+        'Stale job recovered and requeued',
       );
     }
   }
-
-
 
   private async renewLease(
     jobId: string,
@@ -377,19 +429,24 @@ export class ImageWorkerService
           eq(jobs.leaseId, leaseId),
         ),
       )
-      .returning({ id: jobs.id });
+      .returning({
+        id: jobs.id,
+      });
 
     if (result.length === 0) {
-      console.log(
-        `Job ${jobId} lease is no longer owned by this worker`,
+      this.logger.warn(
+        { jobId },
+        'Job lease is no longer owned by this worker',
       );
 
       return false;
     }
 
-    console.log(`Lease renewed for job ${jobId}`);
+    this.logger.debug(
+      { jobId },
+      'Lease renewed',
+    );
 
     return true;
   }
-
 }

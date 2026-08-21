@@ -3,31 +3,31 @@ import { JobsService } from './job.service';
 
 @Controller('jobs')
 export class JobsController {
-    constructor(private readonly jobsService: JobsService) { }
+  constructor(private readonly jobsService: JobsService) { }
 
     @Post()
-    create(
+  create(
         @Body()
-        body: {
+          body: {
             type: string;
             input?: unknown;
             parameters?: unknown;
         },
-    ) {
-        return this.jobsService.create(
-            body.type,
-            body.input,
-            body.parameters,
-        );
-    }
+  ) {
+    return this.jobsService.create(
+      body.type,
+      body.input,
+      body.parameters,
+    );
+  }
 
     @Get()
     findAll() {
-        return this.jobsService.findAll();
+      return this.jobsService.findAll();
     }
 
     @Post(':id/retry')
     retryJobs(@Param('id') id: string) {
-            return this.jobsService.retryFailedJob(id);
+      return this.jobsService.retryFailedJob(id);
     }
 }
