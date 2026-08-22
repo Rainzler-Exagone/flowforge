@@ -64,19 +64,19 @@ jobs:
         run: |
           docker build \
             -f Dockerfile.worker \
-            -t ghcr.io/${{ github.repository_owner }}/flowforge-worker:${{ github.sha }} \
-            -t ghcr.io/${{ github.repository_owner }}/flowforge-worker:latest \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-worker:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-worker:latest \
             .
 
       - name: Push API image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/flowforge-api:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository_owner }}/flowforge-api:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-api:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-api:latest
 
       - name: Push Worker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/flowforge-worker:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository_owner }}/flowforge-worker:latest
+          docker push g${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-worker:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-worker:latest
 
