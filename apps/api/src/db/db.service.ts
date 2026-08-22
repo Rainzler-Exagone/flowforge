@@ -1,7 +1,7 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
-import { db } from "apps/image-worker/src/db";
-import { sql } from "drizzle-orm";
-import { PinoLogger } from "pino-nestjs";
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { db } from 'apps/image-worker/src/db';
+import { sql } from 'drizzle-orm';
+import { PinoLogger } from 'pino-nestjs';
 
 @Injectable()
 export class DatabaseService implements OnModuleInit {
@@ -9,7 +9,7 @@ export class DatabaseService implements OnModuleInit {
 
   async onModuleInit() {
     try {
-      const result = await db.execute(sql`SELECT 1`);
+      await db.execute(sql`SELECT 1`);
 
       this.logger.info('Database connected');
     } catch (error) {

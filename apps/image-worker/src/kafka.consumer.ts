@@ -51,10 +51,10 @@ implements OnModuleInit, OnModuleDestroy {
 
         const { jobId } = JSON.parse(value);
 
-         this.logger.info(
-        { jobId: jobId },
-        'Received job from kafka',
-      );
+        this.logger.info(
+          { jobId },
+          'Received job from kafka',
+        );
         const [job] = await db
           .select()
           .from(jobs)
@@ -71,9 +71,9 @@ implements OnModuleInit, OnModuleDestroy {
 
     });
 
-     this.logger.info(
-        'Image worker kafka consumer connected',
-      );
+    this.logger.info(
+      'Image worker kafka consumer connected',
+    );
   }
 
   async onModuleDestroy() {

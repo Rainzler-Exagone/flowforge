@@ -6,14 +6,18 @@ import { KafkaService } from 'libs/kafka/src';
 import { randomUUID } from 'crypto';
 import { PinoLogger } from 'pino-nestjs';
 
+interface ResizeImageParameters {
+  width: number;
+  height: number;
+}
+
 @Injectable()
-export class ImageWorkerService
-  implements OnModuleInit, OnModuleDestroy {
+export class ImageWorkerService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private readonly kafka: KafkaService,
     private readonly logger: PinoLogger,
-  ) {}
+  ) { }
 
   private readonly JOB_LEASE_MS = 5 * 60 * 1000;
   private recoveryInterval?: NodeJS.Timeout;
@@ -173,10 +177,13 @@ export class ImageWorkerService
 
     await this.sleep(2000);
 
+    const parameters =
+      job.parameters as ResizeImageParameters;
+
     const result = {
       output: `jobs/${job.id}/resized.jpg`,
-      width: (job.parameters as any).width,
-      height: (job.parameters as any).height,
+      width: parameters.width,
+      height: parameters.height,
     };
 
     const [createdResult] = await db

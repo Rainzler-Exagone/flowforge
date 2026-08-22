@@ -7,7 +7,7 @@ import { PinoLogger } from 'pino-nestjs';
 
 @Injectable()
 export class OutboxPublisherService
-  implements OnModuleInit, OnModuleDestroy {
+implements OnModuleInit, OnModuleDestroy {
 
   private interval?: NodeJS.Timeout;
 

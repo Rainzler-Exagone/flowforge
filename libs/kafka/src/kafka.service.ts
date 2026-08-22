@@ -8,7 +8,7 @@ import { PinoLogger } from 'pino-nestjs';
 
 @Injectable()
 export class KafkaService
-  implements OnModuleInit, OnModuleDestroy {
+implements OnModuleInit, OnModuleDestroy {
 
   constructor(private readonly logger: PinoLogger) { }
   private readonly kafka = new Kafka({
