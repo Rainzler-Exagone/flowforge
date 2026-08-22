@@ -77,6 +77,6 @@ jobs:
       - name: Push Worker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
-          docker push g${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-worker:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-worker:${{ github.sha }}
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/flowforge-worker:latest
 
